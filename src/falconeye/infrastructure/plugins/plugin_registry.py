@@ -127,7 +127,12 @@ class PluginRegistry:
         self.register(PythonPlugin())
 
         # Register JavaScript/TypeScript plugin
-        self.register(JavaScriptPlugin())
+        js_plugin = JavaScriptPlugin()
+        self.register(js_plugin)
+        # LanguageDetector reports .ts/.tsx/.mts/.cts as "typescript";
+        # without this alias get_plugin("typescript") returns None and
+        # TypeScript files fall back to the generic prompt.
+        self._plugins["typescript"] = js_plugin
 
         # Register Go plugin
         self.register(GoPlugin())

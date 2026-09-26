@@ -11,7 +11,25 @@
 
 **Next-Generation Security Code Analysis Powered by Local LLMs**
 
-*by hardw00t & h4ckologic*
+*FalconEYE-NG – maintained by [NoAuthZone](https://github.com/NoAuthZone) · based on FalconEYE by [hardw00t](https://github.com/hardw00t) & [h4ckologic](https://github.com/h4ckologic)*
+
+> [!NOTE]
+> **About this project**
+>
+> FalconEYE-NG is an independent continuation of **FalconEYE**, originally
+> developed by hardw00t & h4ckologic and published at
+> `github.com/FalconEYE-ai/FalconEYE`. That repository is no longer publicly
+> available (as of September 2026).
+>
+> - The complete original commit history is preserved in this repository.
+>   The last upstream state is the original authors' own release tag
+>   [`v2.1.0`](../../tree/v2.1.0)
+>   (commit `92c3d76`, 2026-03-10).
+> - All changes made after that point are listed with dates in
+>   [CHANGELOG.md](CHANGELOG.md).
+> - This project is **not affiliated with or endorsed by** the original authors.
+>   Please report issues with FalconEYE-NG here, not to them.
+> - Licensed under **AGPL-3.0-or-later**, like the original – see [License](#license).
 
 FalconEYE represents a paradigm shift in static code analysis. Instead of relying on predefined vulnerability patterns, it leverages large language models to reason about your code the same way a security expert would — understanding context, intent, and subtle security implications that traditional tools miss.
 
@@ -114,7 +132,9 @@ FalconEYE follows a multi-stage analysis pipeline:
 ollama pull qwen3-coder:30b
 ollama pull embeddinggemma:300m
 
-# Install FalconEYE
+# Install FalconEYE-NG
+git clone https://github.com/NoAuthZone/FalconEYE-NG.git
+cd FalconEYE-NG
 pip install -e .
 ```
 
@@ -250,7 +270,7 @@ FalconEYE analyzes code in 10 languages with language-specific security knowledg
 | Language | Extensions | Key Vulnerability Categories |
 |----------|-----------|------------------------------|
 | **Python** | `.py`, `.pyw` | Command/code injection, pickle deserialization, SSRF, Django/Flask/FastAPI issues |
-| **JavaScript / TypeScript** | `.js`, `.jsx`, `.ts`, `.tsx`, `.mjs`, `.cjs` | XSS, prototype pollution, eval injection, Node.js/React/Express issues |
+| **JavaScript / TypeScript** | `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, `.tsx`, `.mts`, `.cts` | XSS, prototype pollution, eval injection, Node.js/React/Express issues |
 | **Go** | `.go` | Command injection, SQL injection, race conditions, goroutine leaks |
 | **Rust** | `.rs` | Unsafe blocks, FFI issues, integer overflow, Actix/Axum/Rocket issues |
 | **C / C++** | `.c`, `.cpp`, `.cc`, `.cxx`, `.h`, `.hpp`, `.hxx` | Buffer overflow, format strings, use-after-free, memory corruption |
@@ -488,7 +508,7 @@ A: Initial indexing depends on codebase size. Subsequent scans with smart re-ind
 
 ## Discoveries
 
-CVEs and vulnerabilities discovered by the FalconEYE authors through research and analysis.
+CVEs and vulnerabilities discovered by the original FalconEYE authors (hardw00t & h4ckologic) through research and analysis.
 
 ---
 
@@ -515,11 +535,18 @@ An unauthenticated remote attacker can use the Core protocol to force a target b
 
 ## License
 
-FalconEYE is licensed under the GNU Affero General Public License v3.0 or later (AGPLv3+).
+FalconEYE-NG is licensed under the GNU Affero General Public License v3.0 or
+later (AGPLv3+), the same license as the original FalconEYE it is based on.
 
-See the [LICENSE](LICENSE) file for the complete license text.
+See the [LICENSE](LICENSE) file for the complete license text and
+[NOTICE](NOTICE) for attribution.
 
-Copyright (c) 2025 hardw00t & h4ckologic
+- Original work: Copyright (c) 2025 hardw00t & h4ckologic
+- Modifications: Copyright (c) 2026 NoAuthZone – see [CHANGELOG.md](CHANGELOG.md)
+
+The original authors previously also offered FalconEYE under a separate
+commercial license. That option was theirs alone; FalconEYE-NG is available
+**only** under AGPLv3+, and no commercial license is offered for it.
 
 ---
 
@@ -563,6 +590,6 @@ falconeye projects list
 
 **Built for security engineers who demand more than pattern matching.**
 
-Version 2.0.0 | Python 3.12+ | Ollama + MLX
+Version 3.0.0 | Python 3.12+ | Ollama + MLX
 
-By [hardw00t](https://github.com/hardw00t) & [h4ckologic](https://github.com/h4ckologic)
+FalconEYE-NG by [NoAuthZone](https://github.com/NoAuthZone) · based on FalconEYE by [hardw00t](https://github.com/hardw00t) & [h4ckologic](https://github.com/h4ckologic)

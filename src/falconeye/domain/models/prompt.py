@@ -122,16 +122,31 @@ class PromptContext:
         if self.related_code:
             parts.extend([
                 "",
-                "RELATED CODE (from semantic search):",
+                "RELATED CODE FROM OTHER FILES (from semantic search) - "
+                "BACKGROUND CONTEXT ONLY:",
+                f"Use this only to understand how {self.file_path} is used. "
+                "Do NOT report vulnerabilities that are located in these other "
+                "files - they are reviewed separately.",
+                "<<<RELATED_CODE_START>>>",
                 self.related_code,
+                "<<<RELATED_CODE_END>>>",
             ])
 
         if self.related_docs:
             parts.extend([
                 "",
-                "RELATED DOCUMENTATION (from semantic search):",
+                "RELATED DOCUMENTATION (from semantic search) - BACKGROUND CONTEXT ONLY:",
                 self.related_docs,
             ])
+
+        parts.extend([
+            "",
+            "SCOPE RULE: Report ONLY vulnerabilities whose vulnerable code is "
+            f"inside FILE {self.file_path} (the numbered CODE above). "
+            "Every code_snippet and line number must come from that file. "
+            "If the file contains no vulnerability (e.g. only type "
+            'declarations), return {"reviews": []}.',
+        ])
 
         return "\n".join(parts)
 

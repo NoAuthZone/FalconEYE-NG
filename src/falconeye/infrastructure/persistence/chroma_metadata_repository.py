@@ -10,6 +10,19 @@ from ...domain.repositories.metadata_repository import MetadataRepository
 from ...domain.models.structural import StructuralMetadata
 
 
+# These collections are used as a key/value store only (lookups by id or
+# metadata filter, never semantic queries). Passing explicit placeholder
+# embeddings stops ChromaDB from running its default ONNX embedding model on
+# every upsert, which otherwise downloads ~80 MB on first use (fails offline)
+# and slows indexing. 384 = dimension of Chroma's default model, so existing
+# collections stay compatible.
+_PLACEHOLDER_DIM = 384
+
+
+def _placeholder_embeddings(count: int) -> list:
+    return [[0.0] * _PLACEHOLDER_DIM for _ in range(count)]
+
+
 class ChromaMetadataRepository(MetadataRepository):
     """
     ChromaDB-based implementation for structural metadata storage.
@@ -70,6 +83,7 @@ class ChromaMetadataRepository(MetadataRepository):
         # Store in ChromaDB
         self.collection.upsert(
             ids=[doc_id],
+            embeddings=_placeholder_embeddings(1),
             documents=[metadata_json],
             metadatas=[{
                 "file_path": metadata.file_path,

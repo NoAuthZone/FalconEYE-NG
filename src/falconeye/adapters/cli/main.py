@@ -23,9 +23,14 @@ from .commands_projects import (
 )
 
 # Create Typer app
+def _short_version() -> str:
+    from ... import __version__
+    return ".".join(__version__.split(".")[:2])
+
+
 app = typer.Typer(
     name="falconeye",
-    help="FalconEYE v2.0 - AI-Powered Security Code Review",
+    help=f"FalconEYE-NG v{_short_version()} - AI-Powered Security Code Review",
     add_completion=False,
     no_args_is_help=True,
     rich_markup_mode="rich",
@@ -348,7 +353,7 @@ def upgrade():
     Requirements:
         FalconEYE must be installed from a git clone (pip install -e .).
         Installing from a package archive is not supported — reinstall
-        from the repository instead: https://github.com/FalconEYE-ai/FalconEYE
+        from the repository instead: https://github.com/NoAuthZone/FalconEYE-NG
 
     Usage:
         falconeye upgrade

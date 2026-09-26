@@ -13,6 +13,19 @@ from typing import Dict, List, Optional, Set
 import chromadb
 from chromadb.config import Settings
 
+
+# These collections are used as a key/value store only (lookups by id or
+# metadata filter, never semantic queries). Passing explicit placeholder
+# embeddings stops ChromaDB from running its default ONNX embedding model on
+# every upsert, which otherwise downloads ~80 MB on first use (fails offline)
+# and slows indexing. 384 = dimension of Chroma's default model, so existing
+# collections stay compatible.
+_PLACEHOLDER_DIM = 384
+
+
+def _placeholder_embeddings(count: int) -> list:
+    return [[0.0] * _PLACEHOLDER_DIM for _ in range(count)]
+
 from ...domain.repositories.index_registry import IndexRegistryRepository
 from ...domain.value_objects.project_metadata import (
     FileMetadata,
@@ -72,6 +85,7 @@ class ChromaIndexRegistryAdapter(IndexRegistryRepository):
         # Store in ChromaDB (upsert = add or update)
         self.collection.upsert(
             ids=[doc_id],
+            embeddings=_placeholder_embeddings(1),
             documents=[json.dumps(metadata)],  # Store as JSON string
             metadatas=[{"type": "project", "project_id": project.project_id}],
         )
@@ -147,6 +161,7 @@ class ChromaIndexRegistryAdapter(IndexRegistryRepository):
         # Store in ChromaDB
         self.collection.upsert(
             ids=[doc_id],
+            embeddings=_placeholder_embeddings(1),
             documents=[json.dumps(metadata_dict)],
             metadatas={
                 "type": "file",
@@ -181,7 +196,12 @@ class ChromaIndexRegistryAdapter(IndexRegistryRepository):
             )
 
         # Batch upsert
-        self.collection.upsert(ids=ids, documents=documents, metadatas=metadatas)
+        self.collection.upsert(
+            ids=ids,
+            embeddings=_placeholder_embeddings(len(ids)),
+            documents=documents,
+            metadatas=metadatas,
+        )
 
     def get_file(self, project_id: str, file_path: Path) -> Optional[FileMetadata]:
         """Get file metadata by project ID and file path."""

@@ -172,7 +172,7 @@ def upgrade_command(console: Console) -> None:
         )
         console.print()
         console.print("[yellow]To upgrade from source:[/yellow]")
-        console.print("  git clone https://github.com/FalconEYE-ai/FalconEYE.git")
+        console.print("  git clone https://github.com/NoAuthZone/FalconEYE-NG.git")
         console.print("  pip install -e FalconEYE/")
         return
 

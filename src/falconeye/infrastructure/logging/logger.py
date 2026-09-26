@@ -135,11 +135,29 @@ class FalconEyeLogger:
             rotation: Log rotation strategy (default: "daily")
             retention_days: Days to retain logs (default: 30)
         """
+        self._configure(level, log_file, console, rotation, retention_days)
+
+    def _configure(
+        self,
+        level: str,
+        log_file: Optional[Path],
+        console: bool,
+        rotation: str,
+        retention_days: int,
+    ) -> None:
+        """(Re)build handlers. Safe to call again on the singleton."""
+        self.log_file = Path(log_file).expanduser() if log_file else None
+        log_file = self.log_file
         self.logger = logging.getLogger("falconeye")
         self.logger.setLevel(getattr(logging, level.upper()))
         self.logger.propagate = False  # Don't propagate to root logger
 
-        # Clear any existing handlers
+        # Close and clear any existing handlers
+        for handler in list(self.logger.handlers):
+            try:
+                handler.close()
+            except Exception:
+                pass
         self.logger.handlers.clear()
 
         # Add console handler
@@ -208,6 +226,19 @@ class FalconEyeLogger:
                         console=console,
                         rotation=rotation,
                         retention_days=retention_days,
+                    )
+                    return cls._instance
+
+        # The singleton is usually created early by adapters calling
+        # get_instance() without arguments (no log file). When the CLI later
+        # passes the configured log file, apply it instead of silently
+        # ignoring it - otherwise falconeye.log is never written.
+        if log_file is not None:
+            with cls._lock:
+                current = getattr(cls._instance, "log_file", None)
+                if current is None or Path(current).resolve() != Path(log_file).expanduser().resolve():
+                    cls._instance._configure(
+                        level, log_file, console, rotation, retention_days
                     )
         return cls._instance
 

@@ -1,7 +1,19 @@
+FalconEYE-NG
+Copyright (c) 2026 NoAuthZone (modifications)
+
+This product is a modified version of FalconEYE.
+
 FalconEYE
 Copyright (c) 2025 hardw00t & h4ckologic
 
 This product includes software developed by hardw00t & h4ckologic.
+Original repository: github.com/FalconEYE-ai/FalconEYE (no longer publicly
+available). The complete original history is preserved in this repository;
+the last original state is the original release tag "v2.1.0" (commit 92c3d76,
+2026-03-10).
+
+Modifications by NoAuthZone begin on 2026-09-26 and are described, with
+dates, in CHANGELOG.md.
 
 Licensed under GNU Affero General Public License v3.0 or later (AGPLv3+).
 See LICENSE for details.

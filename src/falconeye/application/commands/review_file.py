@@ -79,7 +79,7 @@ class ReviewFileHandler:
         )
 
         # Read file
-        content = command.file_path.read_text(encoding="utf-8")
+        content = command.file_path.read_text(encoding="utf-8-sig", errors="replace")
 
         # Create review session
         review = SecurityReview.create(

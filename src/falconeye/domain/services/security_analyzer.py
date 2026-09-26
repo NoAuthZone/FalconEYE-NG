@@ -4,6 +4,7 @@ from typing import List, Optional, Callable
 import json
 import re
 import time
+from pathlib import Path
 from ..models.security import SecurityFinding, Severity, FindingConfidence
 from ..models.prompt import PromptContext
 from .llm_service import LLMService
@@ -104,6 +105,9 @@ class SecurityAnalyzer:
                         
                         # Call callback for new findings
                         for finding in incremental_findings:
+                            # Don't announce findings that belong to other files
+                            if not self._is_grounded(finding, context):
+                                continue
                             # Use helper method for consistent signature generation
                             finding_sig = self._finding_signature(finding)
                             if finding_sig not in parsed_findings_signatures:
@@ -137,6 +141,9 @@ class SecurityAnalyzer:
                 findings = parsed_findings
             else:
                 findings = all_findings
+
+            # Drop findings that belong to RAG context files, not this file
+            findings = self._filter_ungrounded_findings(findings, context)
 
             # Enrich incomplete findings via LLM (missing mitigation, snippet, etc.)
             findings = await self._enrich_incomplete_findings(findings, context)
@@ -176,7 +183,7 @@ class SecurityAnalyzer:
                     f.write(f"File: {context.file_path}\n")
                     f.write(f"Error: {str(e)}\n")
                     f.write(f"\n{'='*80}\n")
-                    f.write(f"AI Response:\n")
+                    f.write("AI Response:\n")
                     f.write(f"{'='*80}\n")
                     f.write(raw_response)
             except Exception as debug_error:
@@ -460,6 +467,85 @@ class SecurityAnalyzer:
             return True
         return False
 
+    # ------------------------------------------------------------------
+    # Grounding: make sure a finding really belongs to the reviewed file
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalize_code(text: str) -> str:
+        return re.sub(r"\s+", " ", text or "").strip()
+
+    @staticmethod
+    def _snippet_code_lines(snippet: str) -> List[str]:
+        """Meaningful code lines of a snippet, without '  12 | ' / '  12 > ' prefixes."""
+        lines = []
+        for raw in (snippet or "").splitlines():
+            line = re.sub(r"^\s*\d+\s*[|>]\s?", "", raw).strip()
+            if len(line) >= 8 and re.search(r"[A-Za-z]", line):
+                lines.append(re.sub(r"\s+", " ", line))
+        return lines
+
+    @staticmethod
+    def _related_file_names(related_code: Optional[str], current_file: str) -> List[str]:
+        """Base names of the files that appear in the RAG context."""
+        if not related_code:
+            return []
+        current = Path(current_file).name.lower()
+        names = set()
+        for m in re.finditer(r"\[Related Code \d+\] From (.+?):\s*$", related_code, re.M):
+            name = Path(m.group(1).strip()).name
+            if name and name.lower() != current:
+                names.add(name)
+        return sorted(names)
+
+    def _is_grounded(self, finding: SecurityFinding, context: PromptContext) -> bool:
+        """
+        Return False only when there is clear evidence that the finding
+        describes code from another file (typically a RAG context chunk):
+
+        - the issue title names another context file but not this one, or
+        - none of the snippet's code lines occur in this file while they do
+          occur in the related (context) code.
+
+        Paraphrased snippets that match neither are kept (benefit of doubt).
+        """
+        if context.analysis_type == "enrichment":
+            return True
+
+        current_name = Path(context.file_path).name.lower()
+        issue_lower = (finding.issue or "").lower()
+        for other in self._related_file_names(context.related_code, context.file_path):
+            if other.lower() in issue_lower and current_name not in issue_lower:
+                return False
+
+        code_lines = self._snippet_code_lines(finding.code_snippet)
+        if not code_lines:
+            return True
+
+        file_text = self._normalize_code(context.code_snippet)
+        if any(line in file_text for line in code_lines):
+            return True
+
+        related_text = self._normalize_code(context.related_code or "")
+        if related_text and any(line in related_text for line in code_lines):
+            return False
+
+        return True
+
+    def _filter_ungrounded_findings(
+        self,
+        findings: List[SecurityFinding],
+        context: PromptContext,
+    ) -> List[SecurityFinding]:
+        kept = [f for f in findings if self._is_grounded(f, context)]
+        dropped = len(findings) - len(kept)
+        if dropped:
+            self.logger.info(
+                f"Dropped {dropped} finding(s) that refer to code in other files",
+                extra={"file_path": context.file_path, "dropped": dropped},
+            )
+        return kept
+
     async def _enrich_incomplete_findings(
         self,
         findings: List[SecurityFinding],
@@ -512,7 +598,11 @@ class SecurityAnalyzer:
             "3. code_snippet: The exact vulnerable lines from the source\n"
             "4. line_start / line_end: Exact line numbers from the source code\n"
             "5. adjusted_severity: Your assessed severity after reasoning about exploitability and impact\n"
-            "6. severity_justification: Brief explanation of WHY you chose this severity level\n\n"
+            "6. severity_justification: Brief explanation of WHY you chose this severity level\n"
+            "7. is_valid: false if the finding is NOT a real vulnerability in THIS source code - e.g. the "
+            "code already uses a parameterized query / proper validation, the described code does not exist "
+            "in this file, or the finding describes another file. Otherwise true.\n"
+            "8. invalid_reason: short reason when is_valid is false (else empty)\n\n"
             "SEVERITY ASSESSMENT - reason through these for each finding:\n"
             "- Can a remote unauthenticated attacker exploit this directly? (if yes, likely critical/high)\n"
             "- Does exploitation give code execution or full data access? (if yes, critical)\n"
@@ -529,14 +619,18 @@ class SecurityAnalyzer:
             '    "line_start": <integer line number>,\n'
             '    "line_end": <integer line number>,\n'
             '    "adjusted_severity": "critical|high|medium|low|info",\n'
-            '    "severity_justification": "<why this severity level>"\n'
+            '    "severity_justification": "<why this severity level>",\n'
+            '    "is_valid": true,\n'
+            '    "invalid_reason": ""\n'
             "  }\n"
             "]}\n\n"
             "CRITICAL RULES:\n"
             "- line_start and line_end are MANDATORY integers\n"
             "- code_snippet must be the EXACT lines from the source (max 10 lines)\n"
             "- mitigation must reference specific identifiers from THIS code\n"
-            "- adjusted_severity is MANDATORY for every finding - think carefully about real-world impact"
+            "- adjusted_severity is MANDATORY for every finding - think carefully about real-world impact\n"
+            "- Do NOT keep a finding just by lowering it to info/low when the code is actually safe - "
+            "set is_valid to false instead"
         )
 
         # Add line numbers to the source code so the LLM can reference them
@@ -588,9 +682,16 @@ class SecurityAnalyzer:
                     enrichment_map[idx] = item
 
             result = []
+            rejected = []
             for i, finding in enumerate(findings):
                 if i in enrichment_map:
                     enriched = enrichment_map[i]
+                    # Reviewer says this is not a real issue in this file -> drop
+                    if self._is_explicit_false(enriched.get("is_valid")):
+                        rejected.append(
+                            f"  {finding.issue}: {enriched.get('invalid_reason') or 'not valid'}"
+                        )
+                        continue
                     # Use adjusted severity from enrichment if provided
                     severity = finding.severity
                     adjusted = enriched.get("adjusted_severity")
@@ -630,6 +731,13 @@ class SecurityAnalyzer:
                     extra={"file_path": context.file_path}
                 )
 
+            if rejected:
+                self.logger.info(
+                    f"Rejected {len(rejected)} finding(s) as false positives during enrichment:\n"
+                    + "\n".join(rejected),
+                    extra={"file_path": context.file_path}
+                )
+
             self.logger.info(
                 f"Successfully enriched {len(enrichment_map)} finding(s)",
                 extra={"file_path": context.file_path}
@@ -642,6 +750,15 @@ class SecurityAnalyzer:
                 extra={"file_path": context.file_path, "error": str(e)}
             )
             return findings
+
+    @staticmethod
+    def _is_explicit_false(value) -> bool:
+        """True only for an explicit 'false' (bool or string); missing = valid."""
+        if value is False:
+            return True
+        if isinstance(value, str):
+            return value.strip().lower() in ("false", "no", "0")
+        return False
 
     def _is_generic_mitigation(self, mitigation: str) -> bool:
         """Check if a mitigation string is generic/unhelpful."""
@@ -810,7 +927,6 @@ class SecurityAnalyzer:
         Raises:
             json.JSONDecodeError: If no valid JSON found
         """
-        import re
         
         # Handle empty or None responses
         if not text or not text.strip():

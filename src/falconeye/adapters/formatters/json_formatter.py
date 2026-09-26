@@ -4,6 +4,7 @@ import json
 from typing import Dict, Any
 from ...domain.models.security import SecurityReview, SecurityFinding
 from .base_formatter import OutputFormatter
+from ... import __version__
 
 
 class JSONFormatter(OutputFormatter):
@@ -74,7 +75,7 @@ class JSONFormatter(OutputFormatter):
         return {
             "tool": {
                 "name": "FalconEYE",
-                "version": "2.0",
+                "version": __version__,
                 "analysis_type": "AI-powered security analysis (NO pattern matching)",
             },
             "review": {

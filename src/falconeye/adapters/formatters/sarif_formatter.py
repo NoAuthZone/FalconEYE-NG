@@ -4,6 +4,7 @@ import json
 from typing import Dict, Any, List
 from ...domain.models.security import SecurityReview, SecurityFinding, Severity
 from .base_formatter import OutputFormatter
+from ... import __version__
 
 
 class SARIFFormatter(OutputFormatter):
@@ -72,9 +73,9 @@ class SARIFFormatter(OutputFormatter):
                     "tool": {
                         "driver": {
                             "name": "FalconEYE",
-                            "version": "2.0.0",
-                            "informationUri": "https://github.com/yourusername/falconeye",
-                            "semanticVersion": "2.0.0",
+                            "version": __version__,
+                            "informationUri": "https://github.com/NoAuthZone/FalconEYE-NG",
+                            "semanticVersion": __version__,
                             "rules": self._get_sarif_rules(),
                         }
                     },

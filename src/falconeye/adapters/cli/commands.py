@@ -2,14 +2,11 @@
 
 import asyncio
 import logging
-import time
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Optional
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 from rich.panel import Panel
-from rich.text import Text
-from rich.table import Table
 from rich import box
 
 from ...infrastructure.di.container import DIContainer
@@ -249,53 +246,6 @@ def index_command(
         force_reindex=force_reindex,
     )
 
-    # Discover files first to get total count for progress
-    from ...domain.services.language_detector import LanguageDetector
-    language_detector = container.language_detector
-    
-    # Detect language if not specified
-    if language is None:
-        detected_language = language_detector.detect_language(path)
-    else:
-        detected_language = language
-    
-    # Discover files to get total count
-    try:
-        detected_languages = language_detector.detect_all_languages(path)
-    except Exception:
-        detected_languages = [detected_language]
-    
-    files = []
-    for lang in detected_languages:
-        extensions = language_detector.LANGUAGE_EXTENSIONS.get(lang, [])
-        for ext in extensions:
-            files.extend(list(path.rglob(f"*{ext}")))
-    
-    # Filter excluded patterns
-    filtered_files = []
-    for file_path in files:
-        should_exclude = False
-        relative_path = str(file_path.relative_to(path))
-        for pattern in exclude:
-            pattern_clean = pattern.replace("**", "").replace("*", "")
-            if pattern_clean in relative_path or pattern_clean in str(file_path):
-                should_exclude = True
-                break
-        if not should_exclude:
-            filtered_files.append(file_path)
-    
-    total_files = len(filtered_files)
-    
-    # Track progress
-    processed_files = [0]
-    
-    def update_progress(current: int, total: int):
-        """Update progress callback."""
-        processed_files[0] = current
-        if total > 0:
-            percentage = int((current / total) * 100)
-            return percentage
-        return 0
 
     # Execute with progress
     if verbose:
@@ -329,7 +279,7 @@ def index_command(
             transient=False,
         ) as progress:
             task = progress.add_task(
-                f"Indexing codebase...",
+                "Indexing codebase...",
                 total=100  # Use percentage (0-100)
             )
             
@@ -451,15 +401,13 @@ def review_command(
             # Fallback to single language
             all_languages = [language]
         
-        # Collect files from all detected languages
-        files = []
-        for lang in all_languages:
-            extensions = container.language_detector.LANGUAGE_EXTENSIONS.get(lang, [])
-            for ext in extensions:
-                files.extend(list(path.rglob(f"*{ext}")))
-        
-        # Remove duplicates
-        files = list(set(files))
+        # Collect files (same discovery + exclusions as indexing, so
+        # node_modules/.git/venv/dist etc. are never sent to the LLM)
+        files = container.language_detector.discover_source_files(
+            path,
+            excluded_patterns=container.config.file_discovery.default_exclusions,
+            languages=all_languages,
+        )
 
         if not files:
             console.print(f"[yellow]No source files found in {path}[/yellow]")
@@ -635,7 +583,9 @@ def review_command(
                     for finding in review.findings:
                         aggregate_review.add_finding(finding)
 
-                    progress.advance(task)
+                    # Absolute position (advance() after completed=file_index
+                    # double-counted and made the bar jump past the file)
+                    progress.update(task, completed=file_index)
 
                 except KeyboardInterrupt:
                     progress.update(task, description="[yellow]Analysis cancelled")
@@ -660,9 +610,9 @@ def review_command(
                         console.print(error_msg)
                     else:
                         # In non-verbose mode, suggest using -v for more details
-                        console.print(f"[dim]Run with -v flag for detailed error information[/dim]")
+                        console.print("[dim]Run with -v flag for detailed error information[/dim]")
 
-                    progress.advance(task)
+                    progress.update(task, completed=file_index)
                     continue
 
             if verbose:
@@ -684,6 +634,11 @@ def review_command(
             if len(failed_files) > 5:
                 console.print(f"  [dim]... and {len(failed_files) - 5} more[/dim]")
             console.print(f"[dim]Successfully analyzed: {len(files) - len(failed_files)}/{len(files)} files[/dim]")
+
+        # Previously never set: reports showed files_analyzed=0 and
+        # completed_at=null for every directory review.
+        aggregate_review.files_analyzed = len(files) - len(failed_files)
+        aggregate_review.complete()
 
         review = aggregate_review
 
@@ -764,7 +719,7 @@ def review_command(
                     
                     # Display LLM-enriched findings
                     if review.findings:
-                        console.print(f"\n[bold cyan]Security Findings:[/bold cyan]")
+                        console.print("\n[bold cyan]Security Findings:[/bold cyan]")
                         console.print("")
 
                         for idx, finding in enumerate(review.findings, start=1):
@@ -893,7 +848,7 @@ def review_command(
                     
                     # Display findings immediately if any are found
                     if review.findings:
-                        console.print(f"\n[bold cyan]Security Findings:[/bold cyan]")
+                        console.print("\n[bold cyan]Security Findings:[/bold cyan]")
                         console.print("")
 
                         for idx, finding in enumerate(review.findings, start=1):
@@ -1047,7 +1002,8 @@ def info_command(config_path: Optional[str], console: Console):
 
         # Version info
         console.print("\n[bold]Version:[/bold]")
-        console.print("  FalconEYE: 2.0.0")
+        from ... import __version__
+        console.print(f"  FalconEYE-NG: {__version__}")
         console.print("  Analysis: AI-powered (ZERO pattern matching)")
 
         # LLM info

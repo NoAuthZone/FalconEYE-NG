@@ -325,7 +325,7 @@ class IndexCodebaseHandler:
             )
 
             # Read file
-            content = file_path.read_text(encoding="utf-8")
+            content = file_path.read_text(encoding="utf-8-sig", errors="replace")
 
             # Create code file
             code_file = CodeFile.create(
@@ -566,53 +566,19 @@ class IndexCodebaseHandler:
         Returns:
             List of file paths from all detected languages
         """
-        # Detect all languages in the codebase
-        try:
-            detected_languages = self.language_detector.detect_all_languages(root_path)
-            self.logger.info(
-                "Multi-language detection completed",
-                extra={
-                    "languages_detected": detected_languages,
-                    "language_count": len(detected_languages),
-                }
-            )
-        except Exception as e:
-            # Fallback to single language if detection fails
-            self.logger.warning(
-                "Multi-language detection failed, using primary language only",
-                extra={"error": str(e), "primary_language": language}
-            )
-            detected_languages = [language]
-
-        # Collect files from all detected languages
-        files = []
-        for lang in detected_languages:
-            extensions = self.language_detector.LANGUAGE_EXTENSIONS.get(lang, [])
-            for ext in extensions:
-                # Find all files with this extension
-                found = list(root_path.rglob(f"*{ext}"))
-                files.extend(found)
-
-        # Remove duplicates (in case of overlapping extensions)
-        files = list(set(files))
-
-        # Filter excluded patterns
-        filtered_files = []
-        for file_path in files:
-            should_exclude = False
-            relative_path = str(file_path.relative_to(root_path))
-
-            for pattern in excluded_patterns:
-                # Simple pattern matching (can be enhanced)
-                pattern_clean = pattern.replace("**", "").replace("*", "")
-                if pattern_clean in relative_path or pattern_clean in str(file_path):
-                    should_exclude = True
-                    break
-
-            if not should_exclude:
-                filtered_files.append(file_path)
-
-        return filtered_files
+        # Single pass over the tree: all supported languages, skipped dirs
+        # (node_modules, .git, venv, ...) are pruned and never traversed.
+        files = self.language_detector.discover_source_files(
+            root_path, excluded_patterns=excluded_patterns
+        )
+        self.logger.info(
+            "Source file discovery completed",
+            extra={
+                "files_found": len(files),
+                "primary_language": language,
+            }
+        )
+        return files
 
     def _chunk_content(
         self,
@@ -710,50 +676,65 @@ class IndexCodebaseHandler:
         Returns:
             List of document file paths
         """
-        # Document extensions and patterns
-        doc_patterns = [
-            "*.md",
-            "*.markdown",
-            "*.txt",
-            "*.rst",
-            "*.adoc",
-            "*.asciidoc",
-            "README*",
-            "CONTRIBUTING*",
-            "SECURITY*",
-            "CHANGELOG*",
-            "LICENSE*",
-            "docs/**/*",
-            "documentation/**/*",
+        import fnmatch
+        import os
+
+        # Text document extensions
+        doc_extensions = {
+            ".md", ".markdown", ".txt", ".rst", ".adoc", ".asciidoc",
+        }
+        # Well-known doc files (with or without extension)
+        doc_name_patterns = [
+            "README*", "CONTRIBUTING*", "SECURITY*", "CHANGELOG*", "LICENSE*",
         ]
+        # Directories whose text files count as documentation
+        doc_dirs = {"docs", "documentation"}
+        # Never treat these as docs even inside docs/ (binary / assets)
+        binary_extensions = {
+            ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp", ".pdf",
+            ".zip", ".gz", ".tar", ".woff", ".woff2", ".ttf", ".eot", ".mp4",
+            ".mp3", ".bin", ".exe", ".dll", ".so", ".dylib", ".class", ".jar",
+        }
 
-        doc_files = []
-        for pattern in doc_patterns:
-            found = list(root_path.rglob(pattern))
-            doc_files.extend(found)
+        detector = self.language_detector
+        results: List[Path] = []
 
-        # Remove duplicates
-        doc_files = list(set(doc_files))
+        for dirpath, dirnames, filenames in os.walk(root_path):
+            current = Path(dirpath)
+            rel_dir = current.relative_to(root_path).as_posix()
+            rel_dir = "" if rel_dir == "." else rel_dir
 
-        # Filter excluded patterns and non-files
-        filtered_docs = []
-        for doc_path in doc_files:
-            if not doc_path.is_file():
-                continue
+            # Prune node_modules, .git, venv, ... before descending
+            kept = []
+            for d in dirnames:
+                if d in detector.SKIP_DIRS or d.startswith("."):
+                    continue
+                rel_sub = f"{rel_dir}/{d}" if rel_dir else d
+                if excluded_patterns and detector.is_excluded(rel_sub + "/", excluded_patterns):
+                    continue
+                kept.append(d)
+            dirnames[:] = sorted(kept)
 
-            should_exclude = False
-            relative_path = str(doc_path.relative_to(root_path))
+            in_doc_dir = any(part.lower() in doc_dirs for part in current.relative_to(root_path).parts)
 
-            for pattern in excluded_patterns:
-                pattern_clean = pattern.replace("**", "").replace("*", "")
-                if pattern_clean in relative_path or pattern_clean in str(doc_path):
-                    should_exclude = True
-                    break
+            for name in filenames:
+                ext = Path(name).suffix.lower()
+                if ext in binary_extensions:
+                    continue
+                is_doc = (
+                    ext in doc_extensions
+                    or any(fnmatch.fnmatch(name, p) for p in doc_name_patterns)
+                    or (in_doc_dir and ext not in detector.EXTENSION_TO_LANGUAGE)
+                )
+                if not is_doc:
+                    continue
+                rel_file = f"{rel_dir}/{name}" if rel_dir else name
+                if excluded_patterns and detector.is_excluded(rel_file, excluded_patterns):
+                    continue
+                results.append(current / name)
 
-            if not should_exclude:
-                filtered_docs.append(doc_path)
-
-        return filtered_docs
+        results.sort()
+        return results
 
     async def _process_document(
         self,
@@ -787,7 +768,7 @@ class IndexCodebaseHandler:
 
             # Read document with error handling
             try:
-                content = doc_path.read_text(encoding="utf-8")
+                content = doc_path.read_text(encoding="utf-8-sig", errors="replace")
             except UnicodeDecodeError:
                 self.logger.warning(
                     "Skipping document with encoding error",

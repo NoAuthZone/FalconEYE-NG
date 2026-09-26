@@ -217,7 +217,7 @@ class ConfigLoader:
         yaml_content = default_config.to_yaml()
 
         # Add comments to YAML
-        yaml_with_comments = f"""# FalconEYE v2.0 Configuration
+        yaml_with_comments = f"""# FalconEYE-NG v3.0 Configuration
 #
 # This file configures FalconEYE's behavior. You can override these settings
 # with environment variables (FALCONEYE_*) or by specifying --config at runtime.

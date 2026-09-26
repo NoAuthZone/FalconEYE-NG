@@ -1,6 +1,6 @@
 """HTML formatter for human-readable security reports."""
 
-from typing import Dict, Any
+from typing import Dict
 from datetime import datetime
 from ...domain.models.security import SecurityReview, SecurityFinding, Severity
 from .base_formatter import OutputFormatter

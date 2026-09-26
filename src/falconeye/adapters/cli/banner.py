@@ -1,8 +1,11 @@
 """ASCII art banner for FalconEYE CLI."""
 
 from rich.console import Console
-from rich.panel import Panel
 from rich.text import Text
+
+from ... import __version__
+
+_SHORT_VERSION = ".".join(__version__.split(".")[:2])
 
 
 def print_banner(console: Console):
@@ -20,8 +23,8 @@ def print_banner(console: Console):
     # Create styled text
     banner_text = Text(banner, style="bold cyan")
     subtitle = Text("Security Code Review", style="bold bright_cyan", justify="center")
-    version = Text("v2.0 - AI-Powered Analysis", style="dim cyan", justify="center")
-    authors = Text("by hardw00t & h4ckologic", style="italic dim cyan", justify="center")
+    version = Text(f"v{_SHORT_VERSION} - AI-Powered Analysis", style="dim cyan", justify="center")
+    authors = Text("FalconEYE-NG by NoAuthZone · based on FalconEYE by hardw00t & h4ckologic", style="italic dim cyan", justify="center")
     
     # Print banner
     console.print()
@@ -45,7 +48,7 @@ def print_compact_banner(console: Console):
     ║  ██╔══╝  ██╔══██║██║     ██║     ██║   ██║██║╚██╗██║██╔══╝    ╚██╔╝  ██╔══╝    ║
     ║  ██║     ██║  ██║███████╗╚██████╗╚██████╔╝██║ ╚████║███████╗   ██║   ███████╗  ║
     ║  ╚═╝     ╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚══════╝  ║
-    ║                      Security Code Review - v2.0                          ║
+    ║                      Security Code Review - v3.0                          ║
     ╚═══════════════════════════════════════════════════════════════════════════╗
     """
     

@@ -149,7 +149,7 @@ class DIContainer:
 
         # Domain services - Business logic
         security_analyzer = SecurityAnalyzer(llm_service)
-        context_assembler = ContextAssembler(vector_store, metadata_repo)
+        context_assembler = ContextAssembler(vector_store, metadata_repo, llm_service=llm_service)
         language_detector = LanguageDetector()
         project_identifier = ProjectIdentifier()
         checksum_service = ChecksumService()

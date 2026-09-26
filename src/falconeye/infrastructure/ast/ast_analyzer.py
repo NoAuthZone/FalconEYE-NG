@@ -43,8 +43,12 @@ class EnhancedASTAnalyzer:
         '.dart': 'dart',
         '.js': 'javascript',
         '.jsx': 'javascript',
+        '.mjs': 'javascript',
+        '.cjs': 'javascript',
         '.ts': 'typescript',
-        '.tsx': 'typescript',
+        '.mts': 'typescript',
+        '.cts': 'typescript',
+        '.tsx': 'tsx',  # TSX needs its own tree-sitter grammar (JSX inside TypeScript)
     }
 
     def __init__(self):
@@ -60,6 +64,11 @@ class EnhancedASTAnalyzer:
                 self.parsers[lang] = parser
             except Exception as e:
                 print(f"Warning: Could not initialize parser for {lang}: {e}")
+
+    @staticmethod
+    def _display_language(parser_language: str) -> str:
+        """Map a tree-sitter grammar name to the FalconEYE language name."""
+        return "typescript" if parser_language == "tsx" else parser_language
 
     def analyze_file(
         self,
@@ -84,7 +93,7 @@ class EnhancedASTAnalyzer:
             # Return empty metadata for unsupported languages
             return StructuralMetadata(
                 file_path=file_path,
-                language=language or "unknown"
+                language=self._display_language(language) if language else "unknown"
             )
 
         # Parse code
@@ -95,7 +104,7 @@ class EnhancedASTAnalyzer:
         # Create metadata
         metadata = StructuralMetadata(
             file_path=file_path,
-            language=language
+            language=self._display_language(language)
         )
 
         # Extract based on language
@@ -107,7 +116,7 @@ class EnhancedASTAnalyzer:
             self._analyze_rust(root, content, metadata)
         elif language == "go":
             self._analyze_go(root, content, metadata)
-        elif language in ["javascript", "typescript"]:
+        elif language in ["javascript", "typescript", "tsx"]:
             self._analyze_javascript(root, content, metadata)
         elif language == "java":
             self._analyze_java(root, content, metadata)
@@ -264,24 +273,38 @@ class EnhancedASTAnalyzer:
     def _analyze_javascript(self, root, content: str, metadata: StructuralMetadata):
         """Analyze JavaScript/TypeScript code."""
         # Extract functions
-        func_types = ["function_declaration", "arrow_function", "function"]
-        for func_type in func_types:
-            functions = self._find_nodes_by_type(root, func_type)
-            for func_node in functions:
-                name_node = func_node.child_by_field_name("name")
-                name = name_node.text.decode("utf8") if name_node else "anonymous"
+        func_types = (
+            "function_declaration",
+            "generator_function_declaration",
+            "arrow_function",
+            "function",
+            "function_expression",
+            "method_definition",
+        )
+        # Single traversal for all function-like node types
+        for func_node in self._find_nodes_by_type(root, func_types):
+            # "function" is also the type of the keyword token -> only
+            # count named (syntax) nodes, not the keyword itself
+            if not func_node.is_named:
+                continue
+            name_node = func_node.child_by_field_name("name")
+            if name_node is None and func_node.parent is not None:
+                # const foo = () => {} / const foo = function () {}
+                if func_node.parent.type in ("variable_declarator", "public_field_definition"):
+                    name_node = func_node.parent.child_by_field_name("name")
+            name = name_node.text.decode("utf8") if name_node else "anonymous"
 
-                is_async = any(
-                    child.type == "async" for child in func_node.children
-                )
+            is_async = any(
+                child.type == "async" for child in func_node.children
+            )
 
-                metadata.functions.append(FunctionInfo(
-                    name=name,
-                    line=func_node.start_point[0] + 1,
-                    is_async=is_async,
-                ))
+            metadata.functions.append(FunctionInfo(
+                name=name,
+                line=func_node.start_point[0] + 1,
+                is_async=is_async,
+            ))
 
-        # Extract imports
+        # Extract imports (covers ESM imports and TS "import x = require()")
         imports = self._find_nodes_by_type(root, "import_statement")
         for imp_node in imports:
             statement = imp_node.text.decode("utf8")
@@ -357,17 +380,24 @@ class EnhancedASTAnalyzer:
                     line=func_node.start_point[0] + 1,
                 ))
 
-    def _find_nodes_by_type(self, root, node_type: str) -> List:
-        """Recursively find all nodes of a specific type."""
+    def _find_nodes_by_type(self, root, node_type) -> List:
+        """
+        Find all nodes of a type (or of any type in a collection of types).
+
+        Iterative depth-first walk in source order: no recursion limit on
+        deeply nested code (bundled/generated JS/TS) and faster than the
+        previous recursive closure.
+        """
+        types = {node_type} if isinstance(node_type, str) else set(node_type)
         nodes = []
-
-        def visit(node):
-            if node.type == node_type:
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            if node.type in types:
                 nodes.append(node)
-            for child in node.children:
-                visit(child)
-
-        visit(root)
+            children = node.children
+            if children:
+                stack.extend(reversed(children))
         return nodes
 
     def _extract_python_params(self, func_node) -> List[str]:

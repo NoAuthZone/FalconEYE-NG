@@ -1,7 +1,9 @@
 """Language detection domain service."""
 
+import fnmatch
+import os
 from pathlib import Path
-from typing import Dict, Optional, List
+from typing import Dict, Iterable, Optional, List
 from collections import Counter
 from ..exceptions import LanguageDetectionError
 
@@ -25,7 +27,7 @@ class LanguageDetector:
         "java": [".java"],
         "dart": [".dart"],
         "javascript": [".js", ".jsx", ".mjs", ".cjs"],
-        "typescript": [".ts", ".tsx"],
+        "typescript": [".ts", ".tsx", ".mts", ".cts"],
         "ruby": [".rb", ".rake"],
     }
 
@@ -125,26 +127,114 @@ class LanguageDetector:
         Yields:
             Path objects for source files
         """
-        for item in root_path.rglob("*"):
-            # Skip directories
-            if item.is_dir():
-                continue
+        yield from self.discover_source_files(root_path)
 
-            # Skip if in excluded directory
-            if any(skip_dir in item.parts for skip_dir in self.SKIP_DIRS):
-                continue
+    # ------------------------------------------------------------------
+    # File discovery (single source of truth for index/review/scan)
+    # ------------------------------------------------------------------
 
-            # Skip hidden files
-            if item.name.startswith("."):
-                continue
+    @staticmethod
+    def _has_glob(pattern: str) -> bool:
+        return any(ch in pattern for ch in "*?[")
 
-            # Skip by pattern
-            if any(item.name.endswith(pattern) for pattern in self.SKIP_PATTERNS):
-                continue
+    @classmethod
+    def is_excluded(cls, relative_posix: str, patterns: Iterable[str]) -> bool:
+        """
+        Check a path (relative to the scan root, '/'-separated) against
+        exclusion patterns.
 
-            # Yield if it's a source file
-            if item.suffix.lower() in self.EXTENSION_TO_LANGUAGE:
-                yield item
+        - Glob patterns (``*/node_modules/*``, ``*.min.js``) are matched with
+          fnmatch against the relative path, also with a leading '/' so that
+          ``*/dist/*`` matches a top-level ``dist/`` directory.
+        - Plain strings keep the old behaviour: substring match.
+
+        Only the path *below* the scan root is considered, so a project that
+        itself lives in e.g. ``~/build/app`` is not excluded entirely, and the
+        matching works identically on Windows and POSIX.
+        """
+        rel = relative_posix.lstrip("/")
+        rooted = "/" + rel
+        for raw in patterns or []:
+            pattern = raw.replace("\\", "/").strip()
+            if not pattern:
+                continue
+            if cls._has_glob(pattern):
+                # '**/' is equivalent to '*/' for fnmatch ('*' spans '/')
+                pattern = pattern.replace("**", "*")
+                if fnmatch.fnmatchcase(rel, pattern) or fnmatch.fnmatchcase(rooted, pattern):
+                    return True
+            elif pattern in rel or pattern in rooted:
+                return True
+        return False
+
+    def discover_source_files(
+        self,
+        root_path: Path,
+        excluded_patterns: Optional[Iterable[str]] = None,
+        languages: Optional[Iterable[str]] = None,
+    ) -> List[Path]:
+        """
+        Discover source files below ``root_path``.
+
+        Uses ``os.walk`` and prunes skipped/hidden directories *before*
+        descending, so large trees like ``node_modules`` or ``.git`` are never
+        traversed. Result is sorted for deterministic processing order.
+
+        Args:
+            root_path: Directory (or single file) to scan
+            excluded_patterns: Optional exclusion patterns (see is_excluded)
+            languages: Restrict to these languages (default: all supported)
+
+        Returns:
+            Sorted list of source file paths
+        """
+        root_path = Path(root_path)
+        if root_path.is_file():
+            ext = root_path.suffix.lower()
+            return [root_path] if ext in self.EXTENSION_TO_LANGUAGE else []
+
+        if languages is None:
+            allowed_exts = set(self.EXTENSION_TO_LANGUAGE)
+        else:
+            allowed_exts = {
+                ext
+                for lang in languages
+                for ext in self.LANGUAGE_EXTENSIONS.get(lang, [])
+            }
+
+        patterns = list(excluded_patterns or [])
+        results: List[Path] = []
+
+        for dirpath, dirnames, filenames in os.walk(root_path):
+            current = Path(dirpath)
+            rel_dir = current.relative_to(root_path).as_posix()
+            rel_dir = "" if rel_dir == "." else rel_dir
+
+            # Prune directories in-place (never descend into them)
+            kept = []
+            for d in dirnames:
+                if d in self.SKIP_DIRS or d.startswith("."):
+                    continue
+                rel_sub = f"{rel_dir}/{d}" if rel_dir else d
+                if patterns and self.is_excluded(rel_sub + "/", patterns):
+                    continue
+                kept.append(d)
+            dirnames[:] = sorted(kept)
+
+            for name in filenames:
+                if name.startswith("."):
+                    continue
+                if any(name.endswith(p) for p in self.SKIP_PATTERNS):
+                    continue
+                if Path(name).suffix.lower() not in allowed_exts:
+                    continue
+                rel_file = f"{rel_dir}/{name}" if rel_dir else name
+                if patterns and self.is_excluded(rel_file, patterns):
+                    continue
+                results.append(current / name)
+
+        results.sort()
+        return results
 
     def _determine_primary_language(
         self,

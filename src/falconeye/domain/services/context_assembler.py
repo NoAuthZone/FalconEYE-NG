@@ -1,11 +1,14 @@
 """Context assembler domain service."""
 
-from typing import List, Optional, Dict, Any
+from typing import TYPE_CHECKING, List, Optional, Dict, Any
 import time
 from ..models.prompt import PromptContext
 from ..repositories.vector_store_repository import VectorStoreRepository
 from ..repositories.metadata_repository import MetadataRepository
 from ...infrastructure.logging import FalconEyeLogger
+
+if TYPE_CHECKING:
+    from .llm_service import LLMService
 
 
 class ContextAssembler:
@@ -26,6 +29,7 @@ class ContextAssembler:
         self,
         vector_store: VectorStoreRepository,
         metadata_repo: MetadataRepository,
+        llm_service: Optional["LLMService"] = None,
     ):
         """
         Initialize context assembler.
@@ -33,9 +37,14 @@ class ContextAssembler:
         Args:
             vector_store: Vector store for semantic search
             metadata_repo: Metadata repository for structural info
+            llm_service: Configured LLM service used for query embeddings.
+                Must be the same service that generated the index embeddings
+                (same host + embedding model), otherwise similarity search
+                compares incompatible vectors.
         """
         self.vector_store = vector_store
         self.metadata_repo = metadata_repo
+        self.llm_service = llm_service
         self.logger = FalconEyeLogger.get_instance()
 
     async def assemble_context(
@@ -162,6 +171,15 @@ class ContextAssembler:
             )
             return None
 
+    def _get_embedder(self):
+        """Return the configured LLM service (fallback: default Ollama adapter)."""
+        if self.llm_service is not None:
+            return self.llm_service
+        from ...infrastructure.llm_providers.ollama_adapter import OllamaLLMAdapter
+        if not hasattr(self, "_fallback_embedder"):
+            self._fallback_embedder = OllamaLLMAdapter()
+        return self._fallback_embedder
+
     async def _get_related_code(
         self,
         code_snippet: str,
@@ -188,14 +206,10 @@ class ContextAssembler:
         try:
             # Generate embedding for query using same LLM as indexing
             # This is imported lazily to avoid circular imports
-            from ...infrastructure.llm_providers.ollama_adapter import OllamaLLMAdapter
-
-            # Note: In production, LLM service should be injected
-            # For now, create a temporary instance
-            temp_llm = OllamaLLMAdapter()
+            embedder = self._get_embedder()
             # Truncate to 2048 chars for embeddinggemma:300m context limit
             truncated_query = code_snippet[:2048] if len(code_snippet) > 2048 else code_snippet
-            query_embedding = await temp_llm.generate_embedding(truncated_query)
+            query_embedding = await embedder.generate_embedding(truncated_query)
 
             # Semantic search for similar code using consistent embeddings
             similar_chunks = await self.vector_store.search_similar(
@@ -260,12 +274,10 @@ class ContextAssembler:
         """
         try:
             # Generate embedding for query
-            from ...infrastructure.llm_providers.ollama_adapter import OllamaLLMAdapter
-
-            temp_llm = OllamaLLMAdapter()
+            embedder = self._get_embedder()
             # Truncate to 2048 chars for embeddinggemma:300m context limit
             truncated_query = code_snippet[:2048] if len(code_snippet) > 2048 else code_snippet
-            query_embedding = await temp_llm.generate_embedding(truncated_query)
+            query_embedding = await embedder.generate_embedding(truncated_query)
 
             # Semantic search in documents collection
             doc_chunks = await self.vector_store.search_similar_documents(

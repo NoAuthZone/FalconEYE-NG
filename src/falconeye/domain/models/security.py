@@ -59,21 +59,67 @@ class SecurityFinding:
         cwe_id: Optional[str] = None,
         tags: Optional[List[str]] = None,
     ) -> "SecurityFinding":
-        """Factory method to create a security finding."""
+        """
+        Factory method to create a security finding.
+
+        LLM output is not type-safe: models sometimes return code_snippet as a
+        list of lines, line numbers as strings ("12" / "12-14"), etc. All
+        fields are normalized here so downstream code (location mapping,
+        grounding, formatters) never crashes on unexpected types.
+        """
+        start = cls._to_line(line_start)
+        end = cls._to_line(line_end)
+        # "12-14" given as line_start -> use it as a range
+        if isinstance(line_start, str) and "-" in line_start:
+            parts = line_start.split("-", 1)
+            range_end = cls._to_line(parts[1])
+            if end is None and range_end is not None:
+                end = range_end
         return cls(
             id=uuid4(),
-            issue=issue,
-            reasoning=reasoning,
-            mitigation=mitigation,
+            issue=cls._to_text(issue) or "Unknown issue",
+            reasoning=cls._to_text(reasoning),
+            mitigation=cls._to_text(mitigation),
             severity=severity,
             confidence=confidence,
             file_path=file_path,
-            code_snippet=code_snippet,
-            line_start=line_start,
-            line_end=line_end,
-            cwe_id=cwe_id,
-            tags=tags or [],
+            code_snippet=cls._to_text(code_snippet),
+            line_start=start,
+            line_end=end,
+            cwe_id=cls._to_text(cwe_id) or None,
+            tags=[cls._to_text(t) for t in tags] if isinstance(tags, list) else (
+                [cls._to_text(tags)] if tags else []
+            ),
         )
+
+    @staticmethod
+    def _to_text(value) -> str:
+        """Coerce LLM-provided values to text (list of lines -> joined)."""
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, (list, tuple)):
+            return "\n".join(SecurityFinding._to_text(v) for v in value)
+        if isinstance(value, dict):
+            import json
+            return json.dumps(value, ensure_ascii=False)
+        return str(value)
+
+    @staticmethod
+    def _to_line(value) -> Optional[int]:
+        """Coerce a line number (int, float, '12', 'line 12') to int or None."""
+        if value is None or isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            return value if value > 0 else None
+        if isinstance(value, float):
+            return int(value) if value > 0 else None
+        if isinstance(value, str):
+            import re
+            m = re.search(r"\d+", value)
+            return int(m.group()) if m and int(m.group()) > 0 else None
+        return None
 
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
@@ -160,20 +206,10 @@ class SecurityReview:
         from collections import Counter
         from pathlib import Path
         
-        # Extension to language mapping (same as LanguageDetector)
-        EXTENSION_TO_LANGUAGE = {
-            ".c": "c", ".h": "c",
-            ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".hpp": "cpp", ".hh": "cpp",
-            ".py": "python",
-            ".rs": "rust",
-            ".go": "go",
-            ".php": "php",
-            ".java": "java",
-            ".dart": "dart",
-            ".js": "javascript", ".jsx": "javascript", ".mjs": "javascript", ".cjs": "javascript",
-            ".ts": "typescript", ".tsx": "typescript",
-            ".rb": "ruby", ".rake": "ruby",
-        }
+        from ..services.language_detector import LanguageDetector
+
+        # Single source of truth for extension -> language
+        EXTENSION_TO_LANGUAGE = LanguageDetector.EXTENSION_TO_LANGUAGE
         
         # Count languages from file paths in findings
         language_counts = Counter()

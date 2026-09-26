@@ -20,7 +20,7 @@ class JavaScriptPlugin(LanguagePlugin):
     @property
     def file_extensions(self) -> List[str]:
         """File extensions."""
-        return [".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"]
+        return [".js", ".jsx", ".ts", ".tsx", ".mts", ".cts", ".mjs", ".cjs"]
 
     def get_system_prompt(self) -> str:
         """Get JavaScript/TypeScript-specific system prompt."""
